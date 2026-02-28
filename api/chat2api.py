@@ -150,8 +150,46 @@ def _build_error_token_item(token: str):
     }
 
 
+def _ensure_token_present_in_runtime(token: str):
+    if token not in globals.token_list:
+        globals.token_list.append(token)
+        with open(globals.TOKENS_FILE, "a", encoding="utf-8") as f:
+            f.write(token + "\n")
+
+
+def _reconcile_expired_tokens():
+    expired_entries = get_expired_token_entries()
+    changed = False
+    for _, cfg in expired_entries.items():
+        token = str(cfg.get("full_token") or "").strip()
+        if not token:
+            continue
+        _ensure_token_present_in_runtime(token)
+        if token not in globals.error_token_list:
+            globals.error_token_list.append(token)
+            changed = True
+
+    if changed:
+        _persist_error_tokens()
+
+
+def _restore_token_from_error_pool_if_not_expired(token_key: str):
+    cfg = get_all_token_configs().get(token_key)
+    if not cfg:
+        return
+    token = str(cfg.get("full_token") or "").strip()
+    if not token:
+        return
+
+    expired_keys = set(get_expired_token_entries().keys())
+    if token_key not in expired_keys and token in globals.error_token_list:
+        globals.error_token_list[:] = [t for t in globals.error_token_list if t != token]
+        _persist_error_tokens()
+
+
 @app.post(f"/{api_prefix}/tokens/error" if api_prefix else "/tokens/error")
 async def error_tokens():
+    _reconcile_expired_tokens()
     error_tokens_list = _deduplicate_keep_order(globals.error_token_list)
     data = [_build_error_token_item(token) for token in error_tokens_list]
     return {"status": "success", "error_tokens": error_tokens_list, "data": data}
@@ -229,19 +267,36 @@ async def clear_seed_tokens():
 class TokenConfigRequest(BaseModel):
     token: str
     name: str = ""
+    expires_at: Optional[str] = None
 
 
 class TokenRenameRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
-@app.get(f"/{api_prefix}/codex/usage/{{token_prefix}}" if api_prefix else "/codex/usage/{token_prefix}")
+@app.get(f"/{api_prefix}/codex/usage/{token_prefix}" if api_prefix else "/codex/usage/{token_prefix}")
 async def get_token_codex_usage(token_prefix: str):
+    _reconcile_expired_tokens()
     snapshot = get_codex_snapshot(token_prefix)
     if snapshot:
+        cfg = get_all_token_configs().get(token_prefix, {})
         snapshot["token_name"] = get_token_name(token_prefix) or ""
+        snapshot["expires_at"] = cfg.get("expires_at")
         return {"status": "success", "data": snapshot}
+
+    cfg = get_all_token_configs().get(token_prefix)
+    if cfg:
+        return {
+            "status": "success",
+            "data": {
+                "token_key": token_prefix,
+                "token_name": cfg.get("name") or "",
+                "expires_at": cfg.get("expires_at"),
+            },
+        }
     return {"status": "not_found", "data": None}
+
 
 
 @app.get(f"/{api_prefix}/codex/runtime_tokens/stats" if api_prefix else "/codex/runtime_tokens/stats")
@@ -257,6 +312,7 @@ async def get_runtime_tokens_stats():
 
 @app.get(f"/{api_prefix}/codex/usage" if api_prefix else "/codex/usage")
 async def get_all_codex_usage():
+    _reconcile_expired_tokens()
     return {"status": "success", "data": get_all_codex_snapshots_with_names()}
 
 
@@ -272,12 +328,19 @@ async def create_token_config(req: TokenConfigRequest):
         with open(globals.TOKENS_FILE, "a", encoding="utf-8") as f:
             f.write(token + "\n")
 
-    token_key = add_token_config(token, req.name.strip())
+    try:
+        token_key = add_token_config(token, req.name.strip(), req.expires_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    _reconcile_expired_tokens()
+
     tokens_count = len(set(globals.token_list) - set(globals.error_token_list))
     return {
         "status": "success",
         "token_key": token_key,
         "name": req.name.strip(),
+        "expires_at": get_all_token_configs().get(token_key, {}).get("expires_at"),
         "tokens_count": tokens_count,
     }
 
