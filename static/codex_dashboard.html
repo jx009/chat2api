@@ -148,7 +148,22 @@
   <div id="tab-tokens" style="display:none;">
     <div class="toolbar">
       <span id="token-count"></span>
-      <button class="btn btn-success" type="button" id="btn-add-token">➕ 添加 Token</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary" type="button" id="btn-show-errors">⚠️ 查看错误 Tokens</button>
+        <button class="btn btn-cancel" type="button" id="btn-clear-runtime">🧹 清空运行池</button>
+        <button class="btn btn-success" type="button" id="btn-add-token">➕ 添加 Token</button>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="font-size:14px; color:#94a3b8; margin-bottom:8px;">运行 Token 池（与 /tokens 页面一致）</div>
+      <div id="runtime-stats" class="token-id" style="margin-bottom:8px;"></div>
+      <div class="form-group" style="margin-bottom:8px;">
+        <label for="batch-tokens">批量导入（一行一个 token，支持 access/refresh token）</label>
+        <textarea id="batch-tokens" rows="5" style="width:100%; padding:8px 12px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#e2e8f0; resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary" type="button" id="btn-batch-upload">📥 导入到运行池</button>
+      </div>
     </div>
     <div id="tokens-container"></div>
   </div>
@@ -188,6 +203,17 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="error-tokens-modal">
+    <div class="modal">
+      <h2>⚠️ 错误 Tokens</h2>
+      <div id="error-tokens-content" style="max-height:50vh; overflow:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-success" type="button" id="btn-copy-errors">复制</button>
+        <button class="btn btn-cancel" type="button" data-close="error-tokens-modal">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.location.pathname.replace('/codex/dashboard', '');
 
@@ -200,7 +226,7 @@
         .replace(/'/g, '&#39;');
     }
 
-    function switchTab(tab) {
+    async function switchTab(tab) {
       const btnUsage = document.getElementById('btn-usage');
       const btnTokens = document.getElementById('btn-tokens');
       const tabUsage = document.getElementById('tab-usage');
@@ -211,13 +237,14 @@
         btnTokens.classList.remove('active');
         tabUsage.style.display = '';
         tabTokens.style.display = 'none';
-        loadUsageData();
+        await loadUsageData();
       } else {
         btnTokens.classList.add('active');
         btnUsage.classList.remove('active');
         tabTokens.style.display = '';
         tabUsage.style.display = 'none';
-        loadTokens();
+        await loadTokens();
+        await loadRuntimeStats();
       }
     }
 
@@ -252,6 +279,12 @@
       if (value >= 80) return 'red';
       if (value >= 50) return 'yellow';
       return 'green';
+    }
+
+    function normalizeBatchTokens(text) {
+      const lines = String(text || '').split('\n').map((line) => line.trim());
+      const filtered = lines.filter((line) => line && !line.startsWith('#'));
+      return Array.from(new Set(filtered));
     }
 
     function renderUsageCard(tokenKey, data) {
@@ -352,10 +385,21 @@
       }
     }
 
+    async function loadRuntimeStats() {
+      try {
+        const res = await fetch(`${API_BASE}/codex/runtime_tokens/stats`);
+        const json = await res.json();
+        if (json.status === 'success') {
+          document.getElementById('runtime-stats').textContent = `可用: ${json.tokens_count} · 总数: ${json.token_list_count} · 错误: ${json.error_token_count}`;
+        }
+      } catch (e) {
+        document.getElementById('runtime-stats').textContent = `统计加载失败: ${e.message || e}`;
+      }
+    }
+
     async function submitAddToken() {
       const name = document.getElementById('input-name').value.trim();
       const token = document.getElementById('input-token').value.trim();
-      if (!name) return alert('请输入自定义名称');
       if (!token) return alert('请输入 Token');
 
       try {
@@ -368,7 +412,9 @@
         if (json.status === 'success') {
           closeModal('add-modal');
           await loadTokens();
-          alert(`✅ 添加成功！Token Key: ${json.token_key}`);
+          await loadUsageData();
+          await loadRuntimeStats();
+          alert(`✅ 添加成功！Token Key: ${json.token_key}\n当前可用运行 Token: ${json.tokens_count}`);
         } else {
           alert('添加失败: ' + JSON.stringify(json));
         }
@@ -421,12 +467,87 @@
       }
     }
 
+    async function batchUploadRuntimeTokens() {
+      const textarea = document.getElementById('batch-tokens');
+      const tokens = normalizeBatchTokens(textarea.value);
+      if (!tokens.length) {
+        alert('请输入至少一个有效 token（支持多行，忽略空行和 # 注释）');
+        return;
+      }
+
+      const text = tokens.join('\n');
+      const body = new URLSearchParams();
+      body.append('text', text);
+
+      try {
+        const res = await fetch(`${API_BASE}/tokens/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          textarea.value = '';
+          await loadRuntimeStats();
+          alert(`✅ 已导入 ${tokens.length} 个 token\n当前可用运行 Token: ${json.tokens_count}`);
+        } else {
+          alert('导入失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function clearRuntimeTokens() {
+      if (!confirm('确认清空运行 Token 池吗？\n该操作会清空上传和错误的 Tokens。')) {
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/tokens/clear`, { method: 'POST' });
+        const json = await res.json();
+        if (json.status === 'success') {
+          await loadRuntimeStats();
+          alert(`✅ 运行 Token 池已清空，当前可用: ${json.tokens_count}`);
+        } else {
+          alert('清空失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function showErrorTokens() {
+      try {
+        const res = await fetch(`${API_BASE}/tokens/error`, { method: 'POST' });
+        const json = await res.json();
+        const list = Array.isArray(json.error_tokens) ? json.error_tokens : [];
+        document.getElementById('error-tokens-content').textContent = list.length ? list.join('\n') : '暂无错误 tokens';
+        document.getElementById('error-tokens-modal').classList.add('show');
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function copyErrorTokens() {
+      try {
+        const content = document.getElementById('error-tokens-content').textContent || '';
+        await navigator.clipboard.writeText(content);
+        alert('错误 Tokens 已复制到剪贴板');
+      } catch (e) {
+        alert('复制失败，请手动复制');
+      }
+    }
+
     document.getElementById('btn-usage').addEventListener('click', () => switchTab('usage'));
     document.getElementById('btn-tokens').addEventListener('click', () => switchTab('tokens'));
     document.getElementById('btn-refresh').addEventListener('click', loadUsageData);
     document.getElementById('btn-add-token').addEventListener('click', showAddTokenModal);
     document.getElementById('btn-submit-add').addEventListener('click', submitAddToken);
     document.getElementById('btn-submit-rename').addEventListener('click', submitRename);
+    document.getElementById('btn-batch-upload').addEventListener('click', batchUploadRuntimeTokens);
+    document.getElementById('btn-show-errors').addEventListener('click', showErrorTokens);
+    document.getElementById('btn-copy-errors').addEventListener('click', copyErrorTokens);
+    document.getElementById('btn-clear-runtime').addEventListener('click', clearRuntimeTokens);
 
     document.querySelectorAll('[data-close]').forEach((el) => {
       el.addEventListener('click', () => closeModal(el.getAttribute('data-close')));
@@ -447,7 +568,9 @@
     });
 
     loadUsageData();
+    loadRuntimeStats();
     setInterval(loadUsageData, 30000);
+    setInterval(loadRuntimeStats, 30000);
   </script>
 </body>
 </html>

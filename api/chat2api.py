@@ -149,14 +149,14 @@ async def clear_seed_tokens():
 
 class TokenConfigRequest(BaseModel):
     token: str
-    name: str
+    name: str = ""
 
 
 class TokenRenameRequest(BaseModel):
     name: str
 
 
-@app.get(f"/{api_prefix}/codex/usage/{{token_prefix}}" if api_prefix else "/codex/usage/{token_prefix}")
+@app.get(f"/{api_prefix}/codex/usage/{token_prefix}" if api_prefix else "/codex/usage/{token_prefix}")
 async def get_token_codex_usage(token_prefix: str):
     snapshot = get_codex_snapshot(token_prefix)
     if snapshot:
@@ -165,15 +165,42 @@ async def get_token_codex_usage(token_prefix: str):
     return {"status": "not_found", "data": None}
 
 
+@app.get(f"/{api_prefix}/codex/runtime_tokens/stats" if api_prefix else "/codex/runtime_tokens/stats")
+async def get_runtime_tokens_stats():
+    tokens_count = len(set(globals.token_list) - set(globals.error_token_list))
+    return {
+        "status": "success",
+        "tokens_count": tokens_count,
+        "token_list_count": len(globals.token_list),
+        "error_token_count": len(globals.error_token_list),
+    }
+
+
 @app.get(f"/{api_prefix}/codex/usage" if api_prefix else "/codex/usage")
 async def get_all_codex_usage():
     return {"status": "success", "data": get_all_codex_snapshots_with_names()}
 
 
+
 @app.post(f"/{api_prefix}/codex/tokens" if api_prefix else "/codex/tokens")
 async def create_token_config(req: TokenConfigRequest):
-    token_key = add_token_config(req.token, req.name)
-    return {"status": "success", "token_key": token_key, "name": req.name}
+    token = req.token.strip()
+    if not token or token.startswith("#"):
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    if token not in globals.token_list:
+        globals.token_list.append(token)
+        with open(globals.TOKENS_FILE, "a", encoding="utf-8") as f:
+            f.write(token + "\n")
+
+    token_key = add_token_config(token, req.name.strip())
+    tokens_count = len(set(globals.token_list) - set(globals.error_token_list))
+    return {
+        "status": "success",
+        "token_key": token_key,
+        "name": req.name.strip(),
+        "tokens_count": tokens_count,
+    }
 
 
 @app.get(f"/{api_prefix}/codex/tokens" if api_prefix else "/codex/tokens")
