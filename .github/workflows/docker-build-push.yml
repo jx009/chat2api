@@ -66,8 +66,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ steps.tags.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.tags.outputs.repo }}:buildcache,mode=max
 
       - name: Summary
         run: |
