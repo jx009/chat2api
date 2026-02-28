@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex Usage Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 20px;
+    }
+    h1 { text-align: center; margin-bottom: 20px; color: #38bdf8; }
+
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; justify-content: center; }
+    .tab-btn {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      padding: 8px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .tab-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .btn {
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    .btn-primary { background: #2563eb; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-success { background: #16a34a; }
+    .btn-success:hover { background: #15803d; }
+    .btn-cancel { background: #334155; }
+    .btn-cancel:hover { background: #475569; }
+
+    .card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid #334155;
+    }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .token-name { font-size: 18px; font-weight: 600; color: #f1f5f9; }
+    .token-name-empty { font-size: 18px; font-weight: 600; color: #475569; font-style: italic; }
+    .token-id { font-family: monospace; color: #64748b; font-size: 12px; margin-top: 2px; }
+
+    .card-actions { display: flex; gap: 6px; }
+    .icon-btn {
+      background: none;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .icon-btn:hover { border-color: #64748b; color: #e2e8f0; }
+    .icon-btn.danger:hover { border-color: #ef4444; color: #ef4444; }
+
+    .usage-row { display: flex; gap: 20px; margin-top: 10px; flex-wrap: wrap; }
+    .usage-item { flex: 1; min-width: 200px; }
+    .usage-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+    .progress-bar { height: 8px; background: #334155; border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .green { background: #22c55e; }
+    .yellow { background: #eab308; }
+    .red { background: #ef4444; }
+    .usage-text { font-size: 13px; margin-top: 4px; }
+    .no-data { color: #475569; font-size: 13px; margin-top: 8px; font-style: italic; }
+    .updated { font-size: 11px; color: #475569; margin-top: 8px; }
+
+    .empty-state { text-align: center; color: #64748b; padding: 40px; }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 24px;
+      min-width: 400px;
+      max-width: 90vw;
+      border: 1px solid #334155;
+    }
+    .modal h2 { color: #f1f5f9; margin-bottom: 16px; font-size: 18px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+    .form-group input {
+      width: 100%;
+      padding: 8px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 14px;
+      outline: none;
+    }
+    .form-group input:focus { border-color: #2563eb; }
+    .form-group input::placeholder { color: #475569; }
+    .form-group .hint { font-size: 11px; color: #475569; margin-top: 3px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+    @media (max-width: 640px) {
+      .toolbar { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .modal { min-width: 0; width: 92vw; }
+    }
+  </style>
+</head>
+<body>
+  <h1>🔋 Codex Usage Dashboard</h1>
+
+  <div class="tabs">
+    <button id="btn-usage" class="tab-btn active" type="button">📊 用量监控</button>
+    <button id="btn-tokens" class="tab-btn" type="button">⚙️ Token 管理</button>
+  </div>
+
+  <div id="tab-usage">
+    <div class="toolbar">
+      <span id="count"></span>
+      <button class="btn btn-primary" type="button" id="btn-refresh">🔄 Refresh</button>
+    </div>
+    <div id="usage-container"></div>
+  </div>
+
+  <div id="tab-tokens" style="display:none;">
+    <div class="toolbar">
+      <span id="token-count"></span>
+      <button class="btn btn-success" type="button" id="btn-add-token">➕ 添加 Token</button>
+    </div>
+    <div id="tokens-container"></div>
+  </div>
+
+  <div class="modal-overlay" id="add-modal">
+    <div class="modal">
+      <h2>➕ 添加 Token</h2>
+      <div class="form-group">
+        <label for="input-name">自定义名称</label>
+        <input type="text" id="input-name" placeholder="例如：Jensen的主号、公司共享号">
+        <div class="hint">用于在 Dashboard 上识别该账号</div>
+      </div>
+      <div class="form-group">
+        <label for="input-token">Token（完整）</label>
+        <input type="text" id="input-token" placeholder="粘贴完整的 access_token 或 refresh_token">
+        <div class="hint">系统会截取前 20 位作为 key，完整 token 仅存储在服务端</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" type="button" data-close="add-modal">取消</button>
+        <button class="btn btn-success" type="button" id="btn-submit-add">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="rename-modal">
+    <div class="modal">
+      <h2>✏️ 修改名称</h2>
+      <div class="form-group">
+        <label for="input-rename">新名称</label>
+        <input type="text" id="input-rename" placeholder="输入新的自定义名称">
+      </div>
+      <input type="hidden" id="rename-token-key">
+      <div class="modal-actions">
+        <button class="btn btn-cancel" type="button" data-close="rename-modal">取消</button>
+        <button class="btn btn-primary" type="button" id="btn-submit-rename">确认修改</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.pathname.replace('/codex/dashboard', '');
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function switchTab(tab) {
+      const btnUsage = document.getElementById('btn-usage');
+      const btnTokens = document.getElementById('btn-tokens');
+      const tabUsage = document.getElementById('tab-usage');
+      const tabTokens = document.getElementById('tab-tokens');
+
+      if (tab === 'usage') {
+        btnUsage.classList.add('active');
+        btnTokens.classList.remove('active');
+        tabUsage.style.display = '';
+        tabTokens.style.display = 'none';
+        loadUsageData();
+      } else {
+        btnTokens.classList.add('active');
+        btnUsage.classList.remove('active');
+        tabTokens.style.display = '';
+        tabUsage.style.display = 'none';
+        loadTokens();
+      }
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    function showAddTokenModal() {
+      document.getElementById('input-name').value = '';
+      document.getElementById('input-token').value = '';
+      document.getElementById('add-modal').classList.add('show');
+    }
+
+    function showRenameModal(tokenKey, currentName) {
+      document.getElementById('input-rename').value = currentName || '';
+      document.getElementById('rename-token-key').value = tokenKey;
+      document.getElementById('rename-modal').classList.add('show');
+    }
+
+    function formatSeconds(s) {
+      if (s === null || s === undefined) return '--';
+      const total = Number(s);
+      if (Number.isNaN(total)) return '--';
+      const d = Math.floor(total / 86400);
+      const h = Math.floor((total % 86400) / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      return [d ? `${d}d` : '', h ? `${h}h` : '', m ? `${m}m` : ''].filter(Boolean).join(' ') || '0m';
+    }
+
+    function colorClass(pct) {
+      const value = Number(pct || 0);
+      if (value >= 80) return 'red';
+      if (value >= 50) return 'yellow';
+      return 'green';
+    }
+
+    function renderUsageCard(tokenKey, data) {
+      const name = data.token_name;
+      const nameHtml = name
+        ? `<span class="token-name">🏷️ ${escapeHtml(name)}</span>`
+        : '<span class="token-name-empty">未命名</span>';
+
+      const pct5h = data.codex_5h_used_percent ?? null;
+      const pct7d = data.codex_7d_used_percent ?? null;
+      const hasUsage = pct5h !== null || pct7d !== null;
+      const reset5h = formatSeconds(data.codex_5h_reset_after_seconds);
+      const reset7d = formatSeconds(data.codex_7d_reset_after_seconds);
+      const updated = data.updated_at ? new Date(data.updated_at).toLocaleString() : null;
+
+      let usageHtml = '';
+      if (hasUsage) {
+        const pct5hNum = Number(pct5h || 0);
+        const pct7dNum = Number(pct7d || 0);
+        usageHtml = `
+          <div class="usage-row">
+            <div class="usage-item">
+              <div class="usage-label">5h Window</div>
+              <div class="progress-bar"><div class="progress-fill ${colorClass(pct5hNum)}" style="width:${Math.min(pct5hNum, 100)}%"></div></div>
+              <div class="usage-text">${pct5h !== null ? pct5hNum.toFixed(1) : '--'}% · Reset in ${reset5h}</div>
+            </div>
+            <div class="usage-item">
+              <div class="usage-label">7d Window</div>
+              <div class="progress-bar"><div class="progress-fill ${colorClass(pct7dNum)}" style="width:${Math.min(pct7dNum, 100)}%"></div></div>
+              <div class="usage-text">${pct7d !== null ? pct7dNum.toFixed(1) : '--'}% · Reset in ${reset7d}</div>
+            </div>
+          </div>
+          <div class="updated">Last updated: ${updated || 'N/A'}</div>
+        `;
+      } else {
+        usageHtml = '<div class="no-data">⏳ 暂无用量数据，首次 Codex API 调用后将自动采集</div>';
+      }
+
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div>${nameHtml}<div class="token-id">🔑 ${escapeHtml(tokenKey)}</div></div>
+          </div>
+          ${usageHtml}
+        </div>
+      `;
+    }
+
+    async function loadUsageData() {
+      const container = document.getElementById('usage-container');
+      try {
+        const res = await fetch(`${API_BASE}/codex/usage`);
+        const json = await res.json();
+        const data = json.data || {};
+        const keys = Object.keys(data);
+        document.getElementById('count').textContent = `${keys.length} token(s)`;
+        container.innerHTML = keys.length
+          ? keys.map((k) => renderUsageCard(k, data[k])).join('')
+          : '<div class="empty-state">暂无数据<br>请先在「Token 管理」中添加 Token，并发起至少一次 Codex API 调用</div>';
+      } catch (e) {
+        container.innerHTML = `<div style="color:#ef4444;text-align:center;">Failed to load: ${escapeHtml(e.message || e)}</div>`;
+      }
+    }
+
+    function renderTokenCard(tokenKey, config) {
+      const name = config.name || '';
+      const createdAt = config.created_at ? new Date(config.created_at).toLocaleString() : 'N/A';
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <span class="token-name">🏷️ ${escapeHtml(name || '未命名')}</span>
+              <div class="token-id">Key: ${escapeHtml(tokenKey)}</div>
+              <div class="token-id">Created: ${escapeHtml(createdAt)}</div>
+            </div>
+            <div class="card-actions">
+              <button class="icon-btn" type="button" data-rename-key="${escapeHtml(tokenKey)}" data-rename-name="${escapeHtml(name)}">✏️ 改名</button>
+              <button class="icon-btn danger" type="button" data-delete-key="${escapeHtml(tokenKey)}" data-delete-name="${escapeHtml(name)}">🗑️ 删除</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function loadTokens() {
+      const container = document.getElementById('tokens-container');
+      try {
+        const res = await fetch(`${API_BASE}/codex/tokens`);
+        const json = await res.json();
+        const data = json.data || {};
+        const keys = Object.keys(data);
+        document.getElementById('token-count').textContent = `${keys.length} token(s) configured`;
+        container.innerHTML = keys.length
+          ? keys.map((k) => renderTokenCard(k, data[k])).join('')
+          : '<div class="empty-state">还没有配置任何 Token<br>点击上方「➕ 添加 Token」开始</div>';
+      } catch (e) {
+        container.innerHTML = `<div style="color:#ef4444;text-align:center;">Failed to load: ${escapeHtml(e.message || e)}</div>`;
+      }
+    }
+
+    async function submitAddToken() {
+      const name = document.getElementById('input-name').value.trim();
+      const token = document.getElementById('input-token').value.trim();
+      if (!name) return alert('请输入自定义名称');
+      if (!token) return alert('请输入 Token');
+
+      try {
+        const res = await fetch(`${API_BASE}/codex/tokens`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, name }),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          closeModal('add-modal');
+          await loadTokens();
+          alert(`✅ 添加成功！Token Key: ${json.token_key}`);
+        } else {
+          alert('添加失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function submitRename() {
+      const tokenKey = document.getElementById('rename-token-key').value;
+      const name = document.getElementById('input-rename').value.trim();
+      if (!name) return alert('请输入新名称');
+
+      try {
+        const res = await fetch(`${API_BASE}/codex/tokens/${encodeURIComponent(tokenKey)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          closeModal('rename-modal');
+          await loadTokens();
+          await loadUsageData();
+        } else {
+          alert('修改失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function deleteToken(tokenKey, name) {
+      const title = name || tokenKey;
+      if (!confirm(`确认删除“${title}”吗？\n该操作会同时删除其用量数据。`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/codex/tokens/${encodeURIComponent(tokenKey)}`, { method: 'DELETE' });
+        const json = await res.json();
+        if (json.status === 'success') {
+          await loadTokens();
+          await loadUsageData();
+        } else {
+          alert('删除失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    document.getElementById('btn-usage').addEventListener('click', () => switchTab('usage'));
+    document.getElementById('btn-tokens').addEventListener('click', () => switchTab('tokens'));
+    document.getElementById('btn-refresh').addEventListener('click', loadUsageData);
+    document.getElementById('btn-add-token').addEventListener('click', showAddTokenModal);
+    document.getElementById('btn-submit-add').addEventListener('click', submitAddToken);
+    document.getElementById('btn-submit-rename').addEventListener('click', submitRename);
+
+    document.querySelectorAll('[data-close]').forEach((el) => {
+      el.addEventListener('click', () => closeModal(el.getAttribute('data-close')));
+    });
+
+    document.getElementById('tokens-container').addEventListener('click', (event) => {
+      const renameKey = event.target.getAttribute('data-rename-key');
+      const renameName = event.target.getAttribute('data-rename-name');
+      if (renameKey !== null) {
+        showRenameModal(renameKey, renameName || '');
+        return;
+      }
+      const deleteKey = event.target.getAttribute('data-delete-key');
+      const deleteName = event.target.getAttribute('data-delete-name');
+      if (deleteKey !== null) {
+        deleteToken(deleteKey, deleteName || '');
+      }
+    });
+
+    loadUsageData();
+    setInterval(loadUsageData, 30000);
+  </script>
+</body>
+</html>

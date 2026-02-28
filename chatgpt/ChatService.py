@@ -12,6 +12,7 @@ from api.models import model_proxy
 from chatgpt.authorization import get_req_token, verify_token
 from chatgpt.chatFormat import api_messages_to_chat, stream_response, format_not_stream_response, head_process_response
 from chatgpt.chatLimit import check_is_limit, handle_request_limit
+from chatgpt.codexUsage import extract_codex_usage_headers, update_codex_snapshot
 from chatgpt.fp import get_fp
 from chatgpt.proofofWork import get_config, get_dpl, get_answer_token, get_requirements_token
 
@@ -350,6 +351,14 @@ class ChatService:
             url = f'{self.base_url}/conversation'
             stream = self.data.get("stream", False)
             r = await self.s.post_stream(url, headers=self.chat_headers, json=self.chat_request, timeout=10, stream=True)
+
+            try:
+                codex_snapshot = extract_codex_usage_headers(dict(r.headers))
+                if codex_snapshot and self.req_token:
+                    update_codex_snapshot(self.req_token[:20], codex_snapshot)
+            except Exception:
+                pass
+
             if r.status_code != 200:
                 rtext = await r.atext()
                 if "application/json" == r.headers.get("Content-Type", ""):

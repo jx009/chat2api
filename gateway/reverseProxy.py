@@ -10,6 +10,7 @@ from starlette.background import BackgroundTask
 
 import utils.globals as globals
 from chatgpt.authorization import verify_token, get_req_token
+from chatgpt.codexUsage import extract_codex_usage_headers, update_codex_snapshot
 from chatgpt.fp import get_fp
 from utils.Client import Client
 from utils.Logger import logger
@@ -261,6 +262,14 @@ async def chatgpt_reverse_proxy(request: Request, path: str):
             background = BackgroundTask(client.close)
             r = await client.request(request.method, f"{base_url}/{path}", params=params, headers=headers,
                                      cookies=request_cookies, data=data, stream=True, allow_redirects=False)
+
+            try:
+                codex_snapshot = extract_codex_usage_headers(dict(r.headers))
+                if codex_snapshot and req_token:
+                    update_codex_snapshot(req_token[:20], codex_snapshot)
+            except Exception:
+                pass
+
             if r.status_code == 307 or r.status_code == 302 or r.status_code == 301:
                 return Response(status_code=307,
                                 headers={"Location": r.headers.get("Location")

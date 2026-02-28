@@ -12,6 +12,8 @@ WSS_MAP_FILE = os.path.join(DATA_FOLDER, "wss_map.json")
 FP_FILE = os.path.join(DATA_FOLDER, "fp_map.json")
 SEED_MAP_FILE = os.path.join(DATA_FOLDER, "seed_map.json")
 CONVERSATION_MAP_FILE = os.path.join(DATA_FOLDER, "conversation_map.json")
+CODEX_USAGE_FILE = os.path.join(DATA_FOLDER, "codex_usage.json")
+TOKEN_CONFIG_FILE = os.path.join(DATA_FOLDER, "token_config.json")
 
 count = 0
 token_list = []
