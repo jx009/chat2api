@@ -1,9 +1,11 @@
 import asyncio
 import os
 import types
+from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Request, HTTPException, Form, Security
+
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -21,7 +23,9 @@ from chatgpt.codexUsage import (
     delete_token_config,
     get_all_token_configs,
     get_token_name,
+    get_expired_token_entries,
 )
+
 from utils.Logger import logger
 from utils.configs import api_prefix, scheduled_refresh
 from utils.retry import async_retry
@@ -118,14 +122,89 @@ async def clear_tokens():
     return {"status": "success", "tokens_count": tokens_count}
 
 
+def _deduplicate_keep_order(items):
+    seen = set()
+    result = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _persist_error_tokens():
+    unique_tokens = _deduplicate_keep_order(globals.error_token_list)
+    globals.error_token_list[:] = unique_tokens
+    with open(globals.ERROR_TOKENS_FILE, "w", encoding="utf-8") as f:
+        for token in unique_tokens:
+            f.write(token + "\n")
+
+
+def _build_error_token_item(token: str):
+    token_key = token[:20]
+    return {
+        "token": token,
+        "token_key": token_key,
+        "token_name": get_token_name(token_key) or "",
+    }
+
+
 @app.post(f"/{api_prefix}/tokens/error" if api_prefix else "/tokens/error")
 async def error_tokens():
-    error_tokens_list = list(set(globals.error_token_list))
-    return {"status": "success", "error_tokens": error_tokens_list}
+    error_tokens_list = _deduplicate_keep_order(globals.error_token_list)
+    data = [_build_error_token_item(token) for token in error_tokens_list]
+    return {"status": "success", "error_tokens": error_tokens_list, "data": data}
+
+
+class ErrorTokenRequest(BaseModel):
+    token: str
+
+
+@app.post(f"/{api_prefix}/tokens/error/add" if api_prefix else "/tokens/error/add")
+async def add_error_token(req: ErrorTokenRequest):
+    token = req.token.strip()
+    if not token or token.startswith("#"):
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    if token not in globals.token_list:
+        globals.token_list.append(token)
+        with open(globals.TOKENS_FILE, "a", encoding="utf-8") as f:
+            f.write(token + "\n")
+
+    if token not in globals.error_token_list:
+        globals.error_token_list.append(token)
+        _persist_error_tokens()
+
+    tokens_count = len(set(globals.token_list) - set(globals.error_token_list))
+    return {
+        "status": "success",
+        "tokens_count": tokens_count,
+        "token": _build_error_token_item(token),
+    }
+
+
+@app.post(f"/{api_prefix}/tokens/error/remove" if api_prefix else "/tokens/error/remove")
+async def remove_error_token(req: ErrorTokenRequest):
+    token = req.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    if token in globals.error_token_list:
+        globals.error_token_list[:] = [t for t in globals.error_token_list if t != token]
+        _persist_error_tokens()
+
+    tokens_count = len(set(globals.token_list) - set(globals.error_token_list))
+    return {
+        "status": "success",
+        "tokens_count": tokens_count,
+        "token": _build_error_token_item(token),
+    }
 
 
 @app.get(f"/{api_prefix}/tokens/add/{{token}}" if api_prefix else "/tokens/add/{token}")
 async def add_token(token: str):
+
     if token.strip() and not token.startswith("#"):
         globals.token_list.append(token.strip())
         with open(globals.TOKENS_FILE, "a", encoding="utf-8") as f:

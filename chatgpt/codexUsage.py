@@ -8,7 +8,31 @@ CODEX_USAGE_FILE = os.path.join("data", "codex_usage.json")
 TOKEN_CONFIG_FILE = os.path.join("data", "token_config.json")
 
 _codex_usage_map: Dict[str, Dict[str, Any]] = {}
-_token_config_map: Dict[str, Dict[str, str]] = {}
+_token_config_map: Dict[str, Dict[str, Any]] = {}
+_UNSET = object()
+
+
+def _normalize_expires_at(expires_at: Optional[str]) -> Optional[str]:
+
+    if expires_at is None:
+        return None
+
+    value = str(expires_at).strip()
+    if not value:
+        return None
+
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        dt = datetime.fromisoformat(value)
+    except Exception as exc:
+        raise ValueError("Invalid expires_at format, expected ISO 8601 datetime") from exc
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
 
 
 def _ensure_data_dir():
@@ -155,21 +179,27 @@ def get_all_codex_snapshots() -> Dict[str, Dict[str, Any]]:
     return {k: dict(v) for k, v in _codex_usage_map.items()}
 
 
-def add_token_config(full_token: str, name: str) -> str:
+def add_token_config(full_token: str, name: str, expires_at: Optional[str] = None) -> str:
     token_key = full_token[:20]
+    normalized_expires_at = _normalize_expires_at(expires_at)
     _token_config_map[token_key] = {
         "name": name,
         "full_token": full_token,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": normalized_expires_at,
     }
     _persist_token_config()
     return token_key
 
 
-def update_token_config(token_key: str, name: str) -> bool:
+def update_token_config(token_key: str, name: Optional[str] = None, expires_at: Any = _UNSET) -> bool:
     if token_key not in _token_config_map:
         return False
-    _token_config_map[token_key]["name"] = name
+
+    if name is not None:
+        _token_config_map[token_key]["name"] = name
+    if expires_at is not _UNSET:
+        _token_config_map[token_key]["expires_at"] = _normalize_expires_at(expires_at)
     _persist_token_config()
     return True
 
@@ -186,7 +216,48 @@ def delete_token_config(token_key: str) -> bool:
     return True
 
 
-def get_all_token_configs() -> Dict[str, Dict[str, str]]:
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def is_token_expired(token_key: str, now: Optional[datetime] = None) -> bool:
+    config = _token_config_map.get(token_key)
+    if not config:
+        return False
+    expires_at = _parse_iso_datetime(config.get("expires_at"))
+    if expires_at is None:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now >= expires_at
+
+
+def get_expired_token_entries(now: Optional[datetime] = None) -> Dict[str, Dict[str, Any]]:
+    current = now or datetime.now(timezone.utc)
+    result: Dict[str, Dict[str, Any]] = {}
+    for key, cfg in _token_config_map.items():
+        expires_at = _parse_iso_datetime(cfg.get("expires_at"))
+        if expires_at and current >= expires_at:
+            result[key] = dict(cfg)
+    return result
+
+
+def get_all_token_configs() -> Dict[str, Dict[str, Any]]:
     return {k: dict(v) for k, v in _token_config_map.items()}
 
 
@@ -215,6 +286,45 @@ def _persist_token_config():
     _persist_json_file(TOKEN_CONFIG_FILE, _token_config_map)
 
 
+def _sanitize_token_config_map() -> bool:
+    changed = False
+    for key, cfg in list(_token_config_map.items()):
+        if not isinstance(cfg, dict):
+            _token_config_map[key] = {
+                "name": "",
+                "full_token": "",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": None,
+            }
+            changed = True
+            continue
+
+        if "name" not in cfg:
+            cfg["name"] = ""
+            changed = True
+        if "full_token" not in cfg:
+            cfg["full_token"] = ""
+            changed = True
+        if "created_at" not in cfg:
+            cfg["created_at"] = datetime.now(timezone.utc).isoformat()
+            changed = True
+        if "expires_at" not in cfg:
+            cfg["expires_at"] = None
+            changed = True
+        else:
+            try:
+                normalized = _normalize_expires_at(cfg.get("expires_at")) if cfg.get("expires_at") is not None else None
+            except ValueError:
+                normalized = None
+            if cfg.get("expires_at") != normalized:
+                cfg["expires_at"] = normalized
+                changed = True
+
+    return changed
+
+
 _ensure_data_dir()
 _codex_usage_map = _load_json_file(CODEX_USAGE_FILE)
 _token_config_map = _load_json_file(TOKEN_CONFIG_FILE)
+if _sanitize_token_config_map():
+    _persist_token_config()

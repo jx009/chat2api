@@ -53,6 +53,14 @@ scheduled_refresh = is_true(os.getenv('SCHEDULED_REFRESH', False))
 random_token = is_true(os.getenv('RANDOM_TOKEN', True))
 oai_language = os.getenv('OAI_LANGUAGE', 'zh-CN')
 
+scheduler_temp_unsched_base_seconds = int(os.getenv('SCHEDULER_TEMP_UNSCHED_BASE_SECONDS', 60))
+scheduler_temp_unsched_max_seconds = int(os.getenv('SCHEDULER_TEMP_UNSCHED_MAX_SECONDS', 1800))
+scheduler_timeout_window_seconds = int(os.getenv('SCHEDULER_TIMEOUT_WINDOW_SECONDS', 300))
+scheduler_timeout_threshold = int(os.getenv('SCHEDULER_TIMEOUT_THRESHOLD', 2))
+scheduler_timeout_penalty_seconds = int(os.getenv('SCHEDULER_TIMEOUT_PENALTY_SECONDS', 300))
+scheduler_backoff_base_ms = int(os.getenv('SCHEDULER_BACKOFF_BASE_MS', 300))
+scheduler_backoff_max_ms = int(os.getenv('SCHEDULER_BACKOFF_MAX_MS', 5000))
+
 authorization_list = authorization.split(',') if authorization else []
 chatgpt_base_url_list = chatgpt_base_url.split(',') if chatgpt_base_url else []
 ark0se_token_url_list = ark0se_token_url.split(',') if ark0se_token_url else []

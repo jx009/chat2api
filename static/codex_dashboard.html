@@ -108,7 +108,8 @@
     .modal h2 { color: #f1f5f9; margin-bottom: 16px; font-size: 18px; }
     .form-group { margin-bottom: 14px; }
     .form-group label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
-    .form-group input {
+    .form-group input,
+    .form-group textarea {
       width: 100%;
       padding: 8px 12px;
       background: #0f172a;
@@ -118,9 +119,12 @@
       font-size: 14px;
       outline: none;
     }
-    .form-group input:focus { border-color: #2563eb; }
-    .form-group input::placeholder { color: #475569; }
+    .form-group input:focus,
+    .form-group textarea:focus { border-color: #2563eb; }
+    .form-group input::placeholder,
+    .form-group textarea::placeholder { color: #475569; }
     .form-group .hint { font-size: 11px; color: #475569; margin-top: 3px; }
+
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
     @media (max-width: 640px) {
@@ -178,9 +182,10 @@
       </div>
       <div class="form-group">
         <label for="input-token">Token（完整）</label>
-        <input type="text" id="input-token" placeholder="粘贴完整的 access_token 或 refresh_token">
-        <div class="hint">系统会截取前 20 位作为 key，完整 token 仅存储在服务端</div>
+        <textarea id="input-token" rows="6" style="resize:vertical;" placeholder="支持粘贴完整 access_token / refresh_token，或完整 session JSON"></textarea>
+        <div class="hint">若粘贴 session JSON，系统会自动提取 accessToken；完整 token 仅存储在服务端</div>
       </div>
+
       <div class="modal-actions">
         <button class="btn btn-cancel" type="button" data-close="add-modal">取消</button>
         <button class="btn btn-success" type="button" id="btn-submit-add">确认添加</button>
@@ -206,7 +211,15 @@
   <div class="modal-overlay" id="error-tokens-modal">
     <div class="modal">
       <h2>⚠️ 错误 Tokens</h2>
-      <div id="error-tokens-content" style="max-height:50vh; overflow:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px;"></div>
+      <div class="form-group">
+        <label for="input-error-token">手动调整错误池</label>
+        <textarea id="input-error-token" rows="3" style="resize:vertical;" placeholder="粘贴完整 token（可手动加入错误池或从错误池移除）"></textarea>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-bottom:10px;">
+        <button class="btn btn-primary" type="button" id="btn-error-add">加入错误池</button>
+        <button class="btn btn-cancel" type="button" id="btn-error-remove">移出错误池</button>
+      </div>
+      <div id="error-tokens-content" style="max-height:50vh; overflow:auto; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px;"></div>
       <div class="modal-actions">
         <button class="btn btn-success" type="button" id="btn-copy-errors">复制</button>
         <button class="btn btn-cancel" type="button" data-close="error-tokens-modal">关闭</button>
@@ -285,6 +298,24 @@
       const lines = String(text || '').split('\n').map((line) => line.trim());
       const filtered = lines.filter((line) => line && !line.startsWith('#'));
       return Array.from(new Set(filtered));
+    }
+
+    function extractTokenFromInput(rawValue) {
+      const text = String(rawValue || '').trim();
+      if (!text) return { token: '', source: 'empty' };
+
+      if (text.startsWith('{') && text.endsWith('}')) {
+        try {
+          const obj = JSON.parse(text);
+          const extracted = typeof obj.accessToken === 'string' ? obj.accessToken.trim() : '';
+          if (extracted) return { token: extracted, source: 'json_accessToken' };
+          return { token: text, source: 'json_no_accessToken' };
+        } catch (e) {
+          return { token: text, source: 'raw' };
+        }
+      }
+
+      return { token: text, source: 'raw' };
     }
 
     function renderUsageCard(tokenKey, data) {
@@ -516,13 +547,97 @@
       }
     }
 
+    function renderErrorTokensContent(data, rawList) {
+      const container = document.getElementById('error-tokens-content');
+      const rows = Array.isArray(data) ? data : [];
+      const tokens = Array.isArray(rawList) ? rawList : [];
+      container.dataset.rawTokens = tokens.join('\n');
+
+      if (!rows.length) {
+        container.innerHTML = '<div class="empty-state" style="padding:20px;">暂无错误 tokens</div>';
+        return;
+      }
+
+      container.innerHTML = rows.map((item) => {
+        const name = item.token_name || '未命名';
+        const key = item.token_key || '';
+        const token = item.token || '';
+        return `
+          <div style="padding:8px 0; border-bottom:1px solid #1e293b;">
+            <div style="font-size:13px; color:#e2e8f0;">🏷️ ${escapeHtml(name)}</div>
+            <div style="font-family:monospace; color:#64748b; font-size:12px; margin-top:2px;">Key: ${escapeHtml(key)}</div>
+            <div style="font-family:monospace; color:#94a3b8; font-size:12px; margin-top:4px; word-break:break-all;">${escapeHtml(token)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
     async function showErrorTokens() {
       try {
         const res = await fetch(`${API_BASE}/tokens/error`, { method: 'POST' });
         const json = await res.json();
         const list = Array.isArray(json.error_tokens) ? json.error_tokens : [];
-        document.getElementById('error-tokens-content').textContent = list.length ? list.join('\n') : '暂无错误 tokens';
+        const data = Array.isArray(json.data) ? json.data : list.map((token) => ({ token, token_key: token.slice(0, 20), token_name: '' }));
+        renderErrorTokensContent(data, list);
         document.getElementById('error-tokens-modal').classList.add('show');
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function addErrorTokenManually() {
+      const input = document.getElementById('input-error-token').value || '';
+      const extracted = extractTokenFromInput(input);
+      const token = extracted.token.trim();
+      if (!token) {
+        alert('请输入有效 token');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/tokens/error/add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          document.getElementById('input-error-token').value = '';
+          await loadRuntimeStats();
+          await showErrorTokens();
+          alert(`✅ 已加入错误池\n当前可用运行 Token: ${json.tokens_count}`);
+        } else {
+          alert('操作失败: ' + JSON.stringify(json));
+        }
+      } catch (e) {
+        alert('请求失败: ' + (e.message || e));
+      }
+    }
+
+    async function removeErrorTokenManually() {
+      const input = document.getElementById('input-error-token').value || '';
+      const extracted = extractTokenFromInput(input);
+      const token = extracted.token.trim();
+      if (!token) {
+        alert('请输入有效 token');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/tokens/error/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          document.getElementById('input-error-token').value = '';
+          await loadRuntimeStats();
+          await showErrorTokens();
+          alert(`✅ 已从错误池移除\n当前可用运行 Token: ${json.tokens_count}`);
+        } else {
+          alert('操作失败: ' + JSON.stringify(json));
+        }
       } catch (e) {
         alert('请求失败: ' + (e.message || e));
       }
@@ -530,7 +645,7 @@
 
     async function copyErrorTokens() {
       try {
-        const content = document.getElementById('error-tokens-content').textContent || '';
+        const content = document.getElementById('error-tokens-content').dataset.rawTokens || '';
         await navigator.clipboard.writeText(content);
         alert('错误 Tokens 已复制到剪贴板');
       } catch (e) {
