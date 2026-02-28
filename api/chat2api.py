@@ -352,9 +352,14 @@ async def list_token_configs():
 
 @app.put(f"/{api_prefix}/codex/tokens/{{token_key}}" if api_prefix else "/codex/tokens/{token_key}")
 async def rename_token_config(token_key: str, req: TokenRenameRequest):
-    ok = update_token_config(token_key, req.name)
+    ok = update_token_config(token_key, req.name, req.expires_at)
     if ok:
-        return {"status": "success"}
+        _reconcile_expired_tokens()
+        _restore_token_from_error_pool_if_not_expired(token_key)
+        return {
+            "status": "success",
+            "data": get_all_token_configs().get(token_key, {}),
+        }
     return {"status": "not_found", "message": "Token not found"}
 
 

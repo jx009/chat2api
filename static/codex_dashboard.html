@@ -185,8 +185,14 @@
         <textarea id="input-token" rows="6" style="resize:vertical;" placeholder="支持粘贴完整 access_token / refresh_token，或完整 session JSON"></textarea>
         <div class="hint">若粘贴 session JSON，系统会自动提取 accessToken；完整 token 仅存储在服务端</div>
       </div>
+      <div class="form-group">
+        <label for="input-expires-at">过期时间（可选）</label>
+        <input type="datetime-local" id="input-expires-at">
+        <div class="hint">留空表示永不过期；按浏览器本地时区输入，提交时自动转换为 UTC</div>
+      </div>
 
       <div class="modal-actions">
+
         <button class="btn btn-cancel" type="button" data-close="add-modal">取消</button>
         <button class="btn btn-success" type="button" id="btn-submit-add">确认添加</button>
       </div>
@@ -195,10 +201,15 @@
 
   <div class="modal-overlay" id="rename-modal">
     <div class="modal">
-      <h2>✏️ 修改名称</h2>
+      <h2>✏️ 修改 Token 配置</h2>
       <div class="form-group">
         <label for="input-rename">新名称</label>
-        <input type="text" id="input-rename" placeholder="输入新的自定义名称">
+        <input type="text" id="input-rename" placeholder="输入新的自定义名称（可留空）">
+      </div>
+      <div class="form-group">
+        <label for="input-rename-expires-at">过期时间（可选）</label>
+        <input type="datetime-local" id="input-rename-expires-at">
+        <div class="hint">留空表示永不过期；提交时自动转换为 UTC</div>
       </div>
       <input type="hidden" id="rename-token-key">
       <div class="modal-actions">
@@ -229,8 +240,10 @@
 
   <script>
     const API_BASE = window.location.pathname.replace('/codex/dashboard', '');
+    let tokenConfigCache = {};
 
     function escapeHtml(value) {
+
       return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -268,11 +281,13 @@
     function showAddTokenModal() {
       document.getElementById('input-name').value = '';
       document.getElementById('input-token').value = '';
+      document.getElementById('input-expires-at').value = '';
       document.getElementById('add-modal').classList.add('show');
     }
 
-    function showRenameModal(tokenKey, currentName) {
+    function showRenameModal(tokenKey, currentName, currentExpiresAt) {
       document.getElementById('input-rename').value = currentName || '';
+      document.getElementById('input-rename-expires-at').value = toDatetimeLocalFromIso(currentExpiresAt);
       document.getElementById('rename-token-key').value = tokenKey;
       document.getElementById('rename-modal').classList.add('show');
     }
@@ -316,6 +331,44 @@
       }
 
       return { token: text, source: 'raw' };
+    }
+
+    function toUtcIsoFromDatetimeLocal(localValue) {
+      const value = String(localValue || '').trim();
+      if (!value) return null;
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) {
+        throw new Error('过期时间格式无效');
+      }
+      return d.toISOString();
+    }
+
+    function toDatetimeLocalFromIso(isoValue) {
+      const text = String(isoValue || '').trim();
+      if (!text) return '';
+      const d = new Date(text);
+      if (Number.isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function formatExpireDisplay(isoValue) {
+      const text = String(isoValue || '').trim();
+      if (!text) return '永不过期';
+      const d = new Date(text);
+      if (Number.isNaN(d.getTime())) return text;
+      return d.toLocaleString();
+    }
+
+    function getExpireState(isoValue) {
+      const text = String(isoValue || '').trim();
+      if (!text) return { label: '正常', color: '#22c55e' };
+      const d = new Date(text);
+      if (Number.isNaN(d.getTime())) return { label: '未知', color: '#94a3b8' };
+      const now = Date.now();
+      if (d.getTime() <= now) return { label: '已过期', color: '#ef4444' };
+      if (d.getTime() - now <= 24 * 3600 * 1000) return { label: '即将过期', color: '#eab308' };
+      return { label: '正常', color: '#22c55e' };
     }
 
     function renderUsageCard(tokenKey, data) {
