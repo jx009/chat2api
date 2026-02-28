@@ -156,7 +156,7 @@ class TokenRenameRequest(BaseModel):
     name: str
 
 
-@app.get(f"/{api_prefix}/codex/usage/{token_prefix}" if api_prefix else "/codex/usage/{token_prefix}")
+@app.get(f"/{api_prefix}/codex/usage/{{token_prefix}}" if api_prefix else "/codex/usage/{token_prefix}")
 async def get_token_codex_usage(token_prefix: str):
     snapshot = get_codex_snapshot(token_prefix)
     if snapshot:
